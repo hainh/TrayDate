@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
@@ -35,6 +36,7 @@ namespace TrayDate
                 string[] lines = System.IO.File.ReadAllLines(stateFilePath);
                 textBox1.Text = lines[0];
                 textBox2.Text = lines[1];
+                textBox3.Text = lines[2];
             }
             catch { }
         }
@@ -59,35 +61,88 @@ namespace TrayDate
             notifyIcon.Visible = true;
         }
 
-        private readonly string stateFilePath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TrayDate.txt");
+        private readonly string stateFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "TrayDate.txt");
         private void SaveState()
         {
             try
             {
-                System.IO.File.WriteAllLines(stateFilePath, new string[] { textBox1.Text, textBox2.Text });
+                System.IO.File.WriteAllLines(stateFilePath, new string[] { textBox1.Text, textBox2.Text, textBox3.Text });
             }
             catch { }
+        }
+
+        private Color GetColor()
+        {
+            Color color = Color.White;
+            try
+            {
+                string[] colorParts = new System.Text.RegularExpressions.Regex("[^a-fA-F0-9]")
+                    .Split(textBox3.Text)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToArray();
+                switch (colorParts.Length)
+                {
+                    case 1:
+                        string c = colorParts[0];
+                        switch (c.Length)
+                        {
+                            case 3:
+                                color = Color.FromArgb(Convert.ToInt32($"FF{c[0]}0{c[1]}0{c[2]}0", 16));
+                                break;
+                            case 4:
+                                color = Color.FromArgb(Convert.ToInt32($"{c[0]}{c[0]}{c[1]}{c[1]}{c[2]}{c[2]}{c[3]}{c[3]}", 16));
+                                break;
+                            case 6:
+                                color = Color.FromArgb(Convert.ToInt32("FF" + c, 16));
+                                break;
+                            case 8:
+                                color = Color.FromArgb(Convert.ToInt32(c, 16));
+                                break;
+                            default:
+                                break;
+                        }
+                        break;
+                    case 3:
+                        color = Color.FromArgb(int.Parse(colorParts[0]), int.Parse(colorParts[1]), int.Parse(colorParts[2]));
+                        break;
+                    case 4:
+                        color = Color.FromArgb(int.Parse(colorParts[0]), int.Parse(colorParts[1]), int.Parse(colorParts[2]), int.Parse(colorParts[3]));
+                        break;
+                    default: break;
+                }
+            }
+            catch { }
+            return color;
         }
 
         private void CreateTextIcon()
         {
             Rect screen = WpfScreen.GetScreenFrom(this).DeviceBounds;
             double width = SystemParameters.FullPrimaryScreenWidth;
-            int iconWidth = (int)(SystemParameters.SmallIconWidth * screen.Width / width);
+            double scale = screen.Width / width;
+            int iconWidth = (int)(SystemParameters.SmallIconWidth * scale);
 
-            string str = DateTime.Now.ToString(textBox1.Text);
-            int fontHeight = (int)Math.Round(iconWidth * 6 / 7.0);
-            Font fontToUse = new Font("Tahoma", fontHeight, System.Drawing.FontStyle.Regular, GraphicsUnit.Pixel);
-            Brush brushToUse = new SolidBrush(Color.White);
+            Color color = GetColor();
+            string str = string.Join("\n", new System.Text.RegularExpressions.Regex(@"\W").Split(DateTime.Now.ToString(textBox1.Text)));
+            float fontHeight = (float)Math.Round(iconWidth * 6 / 7.0);
+            Font fontToUse = new Font(System.Drawing.SystemFonts.DefaultFont.Name, fontHeight, System.Drawing.FontStyle.Regular, GraphicsUnit.Pixel);
+            Brush brushToUse = new SolidBrush(color);
             Bitmap bitmapText = new Bitmap(iconWidth, iconWidth);
             Graphics g = Graphics.FromImage(bitmapText);
 
             IntPtr hIcon;
             SizeF size = g.MeasureString(str, fontToUse);
+            double maxSize = iconWidth + (scale > 1.3 ? scale * 4 : 4);
+            while (size.Width > maxSize - 3 || size.Height > maxSize)
+            {
+                fontHeight -= 1;
+                fontToUse = new Font("Tahoma", fontHeight, System.Drawing.FontStyle.Regular, GraphicsUnit.Pixel);
+                size = g.MeasureString(str, fontToUse);
+            }
 
             g.Clear(Color.Transparent);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-            g.DrawString(str, fontToUse, brushToUse, (bitmapText.Width - size.Width) / 2, (bitmapText.Height - size.Height) / 2);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
             Brush lineBrush = new SolidBrush(Color.CadetBlue);
             Pen pen = new Pen(lineBrush);
             int x = bitmapText.Width - 1, y = bitmapText.Height - 1;
@@ -95,6 +150,8 @@ namespace TrayDate
             g.DrawRectangle(pen, 0, 0, x, y);
             g.DrawLine(pen, x - d, y, x, y - d);
             g.DrawLine(pen, x - d + 1, y, x, y - d + 1);
+            g.DrawString(str, fontToUse, brushToUse, (bitmapText.Width - size.Width) / 2, (bitmapText.Height - size.Height) / 2);
+
             hIcon = bitmapText.GetHicon();
             notifyIcon.Icon = System.Drawing.Icon.FromHandle(hIcon);
             notifyIcon.Text = DateTime.Now.ToString(textBox2.Text);
